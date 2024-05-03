@@ -1,0 +1,198 @@
+---
+title: "An Analysis of 'Risk prediction in life insurance industry using supervised learning
+algorithms'"
+author: "Nimalan Subramanian"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+In the field of life insurance, risk assessment is a crucial component in classifying applicants. The underwriting process is used to make decisions on applications and price policies. Due to the rising number of applicants for life insurance, many insurance companies seek a faster, automated process to classify applicants and make decisions. Through the use of supervised learning algorithms, automating such a process has been proven to be both possible and effective. This is the main purpose of Noorhannah Boodhun and Manoj Jayabalan's "Risk Prediction in Life Insurance Industry Using Supervised Learning Algorithms. To determine whether the results of this initial analysis is valid, this project aims to recreate the main feature tools being modeled, the Principal Components Analysis (PCA) and the COrrealtion-Based Feature Selection (CFS). However, the utilization of such algorithms and the relevant data has various concerns, particularly ethical considerations. This stems from a sense of privacy in the data and whether the process itself is fair. As such, the breakdown for how these algorithms are made and utilized must be studied to determine whether they are morally sound to implement.
+
+# Analysis of Methods
+In order to test the validity of one of the methods used in Boodhun and Jayabalan's assessment, the results needed to be verified. Too do this, the same data used in the original analysis was obtained publicaly through the Prudential Life Insurance Assessment Data on Kaggle. Before a method to verify results were simulated, initial exploratory data analysis was done to get an understanding of the data. For this, an initial summary was done, with general information being provided below:
+
+```{r summary, echo = FALSE}
+# load data
+train = read.csv("train.csv")
+train0 = train[,-128]
+test = read.csv("test.csv")
+data = rbind(train0, test)
+par(mfrow = c(2, 2), mar=c(4,4,2,2))
+
+# Get summary of data
+IQR = function(x){
+        results = summary(x)
+        results[5] - results [2]
+}
+
+m1 = c(mean(data$Ins_Age), mean(data$Ht), mean(data$Wt), mean(data$BMI))
+m2 = c(median(data$Ins_Age), median(data$Ht), median(data$Wt), median(data$BMI))
+d = c(sqrt(var(data$Ins_Age)), sqrt(var(data$Ht)), sqrt(var(data$Wt)), sqrt(var(data$BMI)))
+i = c(IQR(data$Ins_Age), IQR(data$Ht), IQR(data$Wt), IQR(data$BMI))
+summ = round(rbind(m1, m2, d, i), 4)
+dimnames(summ) = list(c("Mean", "Median", "Std Dev", "IQR"), c("Age", "Height", "Weight", "BMI"))
+write.csv(summ, "Continuous_Summary.csv")
+
+par(mfrow = c(1, 1))
+plot(c(0.9, 1.9, 2.9, 3.9), m1, xlim = c(0.8, 4.2), ylim = c(0, 1), main = "", xaxt = "n",
+     xlab = "Age          Height          Weight          BMI", ylab = "", type = "h", col = "red", lwd = 2)
+lines(m2, type = "h", col = "firebrick", lwd = 2)
+lines(c(1.1, 2.1, 3.1, 4.1), d, type = "h", col = "navyblue", lwd = 2)
+lines(c(1.2, 2.2, 3.2, 4.2), i, type = "h", col = 5, lwd = 2)
+legend("topright", c("Mean", "Median", "Std Dev", "IQR"), col = c("red", "firebrick", "navyblue", 5), lty = 1, lwd = 2)
+```
+To gauge a better understanding of the data, an initial response variable was created to relate to specific vatiables for analysis. In this case, the sample BMI variable was normalized before undergoing various levels of analysis. First, a univariate analysis of the variable was done through the construction of a histogram:
+
+```{r univar, echo = FALSE}
+# Create response variable
+par(mfrow = c(1, 1))
+response = table(train$Response)
+barplot(response, col = c("bisque1", "bisque3"), ylab = "Frequency",
+        ylim = c(0, 20000), main = "Response")
+
+# Histogram of BMI
+hist(data$BMI, xlab = "Normalized BMI", probability = TRUE,
+     xlim = extendrange(c(0, 1)))
+lines(density(data$BMI), lwd = 2, col = "firebrick")
+```
+Based on the histogram, the majority volume of life insurance applicants fall in the range between 0.2 and 0.8 for their BMI value (normalized).
+
+Then, a bivariate analysis was done on BMI through a boxplot that looks at its interaction with the risk level response variable, following training of response data:
+
+```{r bivar, echo = FALSE}
+# Train responses
+r1 = train[train$Response==1, ]
+r2 = train[train$Response==2, ]
+r3 = train[train$Response==3, ]
+r4 = train[train$Response==4, ]
+r5 = train[train$Response==5, ]
+r6 = train[train$Response==6, ]
+r7 = train[train$Response==7, ]
+r8 = train[train$Response==8, ]
+
+#Boxplot of BMI
+boxplot(BMI~Response, data = train, main = "Normalized BMI vs. Risk Level", xlab = "Response", ylab = "BMI", 
+        ylim = c(0, 1), col = c("red",2:8), border = adjustcolor("black", alpha.f = 0.5), names = 1:8)
+```
+
+The boxplot data provides far more insight into the interaction between normalized BMI and the the risk level of applicants.
+ 
+Following the EDA, testing the reproducibility of the PCA and CFS began. Prior to this, data was tested for Missing Completely At Random through Little's Test, with the results shown below:
+
+```{r little test, echo = FALSE}
+# read in data
+dat <- read.csv("train.csv")
+
+# find and drop columns with more than 30% missing data
+acc <- c()
+for (i in 1:dim(dat)[2]){
+  if(sum(is.na(dat[,i])) >= dim(dat)[1]*0.3)
+  {acc = c(acc, i)}
+}
+
+dat <- dat[, -acc]
+
+# run Little's Test
+library(remotes)
+library(BaylorEdPsych)
+library(mvnmle)
+dat1<-dat[,1:50]
+dat2<-dat[,51:100]
+dat3<-dat[,101:119]
+mod1<-LittleMCAR(dat1)
+mod1$p.value # p-value is 0
+mod2<-LittleMCAR(dat2)
+mod2$p.value # p- value is 1
+mod3<-LittleMCAR(dat3)
+mod3$p.value # p-value is 0
+```
+
+From this, a significance value of 0.000 is show, determining that missing data was not completely at random, as done in the original article. Knowing this, I moved onto cleaning the data with multiple imputations to replace missing values. This was done using the MICE (Multivariate Imputation via Chained Equations), as done in the original, keeping in mind that I was assuming missing data to be Missing at Random. 
+
+```{r imputation, include = FALSE}
+ind <- apply(dat, 2, function(x) any(is.na(x)));ind
+which(ind == TRUE)
+# Employment_Info_1 Employment_Info_4 Employment_Info_6 Medical_History_1 
+# 13                16                18                34 
+library(mice)
+temp <- mice(dat,m=5)
+train2 <- complete(temp,1)
+
+# testing train 2
+X<-train2[,-c(1,119)]
+colnames(X)
+index.quali<-c(1,2,3,5,6,7)
+for (i in index.quali){
+  X[,i]<-as.factor(X[,i])
+}
+
+y<-as.data.frame(as.factor(train2[,c(119)]))
+train2<-cbind(X,y)
+colnames(train2)[118]<-c("Risk")
+colnames(train2)
+```
+
+Following imputation, the PCA and CFS models were recreated:
+
+```{r PCA, echo = FALSE}
+# run PCA model
+library(PCAmixdata)
+
+X.quanti<-train2[,-c(1,2,3,5,6,7,118)]
+X.quali<-as.data.frame(train2[,c(1,2,3,5,6,7)])
+dim(train2)
+# 20 variables were selected out of 117 features (ID excluded).
+PCA.model<-PCAmix(X.quanti = X.quanti, X.quali = X.quali, ndim = 20, rename.level=TRUE)
+X_PCA<-predict(PCA.model, 
+                           X.quanti = X.quanti, 
+                           X.quali = X.quali)
+summary(X_PCA)
+```
+
+```{r CFS, include = FALSE}
+# 33 variables selected from 117 variables
+col_vec<-rep(0,ncol(X.quanti))
+for (i in 1:ncol(X.quanti)){
+ col_vec[i]<-abs(cor(X.quanti[,i],as.numeric(as.matrix(y))))
+}
+
+
+index<-order(col_vec, decreasing=TRUE)[1:33]
+col_vec[index]
+colnames(X.quanti)[index]
+```
+
+```{r CFS output, echo = FALSE}
+# Run CFS
+library(rcompanion)
+cramerV(train2$Risk,train2$Product_Info_2) # 0.1445
+index<-order(col_vec, decreasing=TRUE)[1:32]
+features<-colnames(X.quanti)[index]
+features<-append(features,"Product_Info_2")
+index2<-rep(0,33)
+for (i in 1:33){
+  index2[i]<-which(colnames(X)==features[i])
+}
+index2
+X_CFS<-X[,index2]
+```
+
+Based on the results of the PCA and CFS, both methods are shown to be reproducible with the same results as the analysis by Boodhun and Jayabalan. This can be further used on other data in order to prepare for supervised learning algorithms, such as Multiple Regressions, REPTrees, and Artificial Neural Networks. These feature selections are a key component in being able to produce accurate outcomes for the methods. Without such selection methods, the validation of further methods must be called into question. In the case of this model, the analysis of Boodhun and Jayabalan is held valid.
+
+# Analysis of Normative Consideration
+
+While such algorithms are efficient for companies to evaluate the risk levels of insurance patients, there are a number of ethical concerns with this process. The primary issue at hand stems from the ambiguity of data privacy and consent. The process details that a step includes ensuring anonymity of its applicants. However, this information is still accessible prior to data cleaning and manipulation. This is best highlighted in the case of this analysis, where the initial data was easily discovered and used to validate the results of the initial analysis. Even in the case that such information is not provided, the primary variables that remain, employment history and medical history, can still be traced back to the applicant. Due to this concern, the purpose of consent is considered. While applicants may comply to the standards of consent provided by the company, the consideration of informed consent v tacit consent arises. Are applicants truly provided with all information that is digestible to them and are they providing their consent knowing everything they are complying to? In the case of tacit consent, potential misuse of data can occur, and the true benefits of providing consent must be explored.
+
+Apart from data privacy and consent, an argument of fairness arises in the process to determine the risk prediction for each applicant. Justice as equality versus merit serves as a major point of consideration. In this field, merit would be used as the main factor, exemplified by the use of employment history and medical history as the primary variables to consider. On the other side of this argument, are these variables a fair measure of providing that value to the applicants? Without such considerations, the reliance on these variables could potentially result in a form of algorithmic bias that favors certain types of applicants over others. Overall, a consideration of the true degree of consent and the extent to which this process is fair must be done.
+
+# Conclusion
+
+Undoubtedly, the utilization of supervised learning algorithms provides a faster, more automated process for risk assessment. These algorithms are also determined to be valid in the results they produce, and are capable of reproducing initial output, proving how efficient and accurate such learning algorithms are. Yet, these types of advanced learning methods also cross a line of acceptable ethical considerations, particularly in regards to the field in which such algorithms are being implemented. In this case of risk assessment and life insurance, the data being handled by such algorithms is that of extreme privacy. Determining who has access to such data is a serious consideration, followed by how much of that data should even be provided to others. In all cases, a question rises: is the applicant aware that their information is readily accessible? As determined by the case of this paper, the main company in charge of this study, Prudential, has provided such information in a public space, albeit in an anonymous manner. Even in this case, so much information about each applicant is revealed; if there are others who have access to more advanced forms to look at the data, what other information can be found? May it even be possible to trace the information back to the applicant, even if they are supposedly anonymous? While the use of such algorithms are definitely a step to be taken in the future for the field of risk assessment, the concerns of privacy and consent regarding applicant data must first be addressed for this practice to truly be safe.
